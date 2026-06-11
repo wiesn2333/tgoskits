@@ -1,5 +1,7 @@
 //! User task management.
 
+pub(crate) mod async_io;
+pub(crate) use async_io::AsyncContext;
 mod cred;
 pub mod futex;
 mod ops;
@@ -170,6 +172,9 @@ pub struct Thread {
     pub fault_dump_signo: AtomicU8,
 
     pub kretprobe_stack: SpinNoIrq<alloc::vec::Vec<kprobe::retprobe::RetprobeInstance>>,
+
+    /// Async I/O context (CQ + user handler).
+    pub async_ctx: SpinNoIrq<Option<Arc<AsyncContext>>>,
 }
 
 impl Thread {
@@ -200,6 +205,7 @@ impl Thread {
 
             fault_dump_signo: AtomicU8::new(0),
             kretprobe_stack: SpinNoIrq::new(alloc::vec::Vec::new()),
+            async_ctx: SpinNoIrq::new(None),
         })
     }
 

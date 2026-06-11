@@ -203,6 +203,28 @@ impl FileLike for File {
         Ok((self.inner().backend()?.clone(), self.inner().flags()))
     }
 
+    fn read_at(&self, dst: &mut IoDst, offset: u64) -> AxResult<usize> {
+        let inner = self.inner();
+        if likely(self.is_blocking()) {
+            inner.read_at(dst, offset)
+        } else {
+            block_on(poll_io(self, IoEvents::IN, self.nonblocking(), || {
+                inner.read_at(&mut *dst, offset)
+            }))
+        }
+    }
+
+    fn write_at(&self, src: &mut IoSrc, offset: u64) -> AxResult<usize> {
+        let inner = self.inner();
+        if likely(self.is_blocking()) {
+            inner.write_at(src, offset)
+        } else {
+            block_on(poll_io(self, IoEvents::OUT, self.nonblocking(), || {
+                inner.write_at(&mut *src, offset)
+            }))
+        }
+    }
+
     fn set_nonblocking(&self, flag: bool) -> AxResult {
         self.nonblock.store(flag, Ordering::Release);
         Ok(())

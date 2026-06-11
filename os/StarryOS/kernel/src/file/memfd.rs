@@ -448,6 +448,37 @@ impl FileLike for Memfd {
         Ok(written)
     }
 
+    fn read_at(&self, dst: &mut IoDst, offset: u64) -> AxResult<usize> {
+        self.inner.read_at(dst, offset)
+    }
+
+    fn write_at(&self, src: &mut IoSrc, offset: u64) -> AxResult<usize> {
+        if src.remaining() == 0 {
+            return Ok(0);
+        }
+        let _guard = self.truncate_mtx.lock();
+        let seals = self.get_seals();
+        if seals & F_SEAL_WRITE != 0 {
+            return Err(AxError::OperationNotPermitted);
+        }
+        if seals & F_SEAL_GROW == 0 {
+            return self.inner.write_at(src, offset);
+        }
+        let cur_len = self.inner.inner().backend()?.location().len()?;
+        if offset >= cur_len {
+            return Err(AxError::OperationNotPermitted);
+        }
+        let max_writable = (cur_len - offset) as usize;
+        let want = src.remaining().min(max_writable);
+        if want == 0 {
+            return Ok(0);
+        }
+        let f = self.inner.inner().access(FileFlags::WRITE)?;
+        let mut buf = alloc::vec![0u8; want];
+        let n = src.read(&mut buf)?;
+        f.write_at(&buf[..n], offset)
+    }
+
     fn stat(&self) -> AxResult<Kstat> {
         self.inner.stat()
     }

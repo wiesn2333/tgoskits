@@ -1,4 +1,7 @@
-use ax_runtime::hal::cpu::uspace::{ExceptionInfo, ExceptionKind, ReturnReason, UserContext};
+use ax_runtime::hal::cpu::{
+    asm::user_copy,
+    uspace::{ExceptionInfo, ExceptionKind, ReturnReason, UserContext},
+};
 use ax_task::TaskInner;
 use starry_process::Pid;
 use starry_signal::{SignalInfo, Signo};
@@ -11,6 +14,44 @@ use super::{
     unblock_next_signal,
 };
 use crate::syscall::{handle_syscall, syscall_allows_signal_restart};
+
+/// Save return address in `uctx` and redirect `ip` to the async completion handler.
+/// Returns false on stack manipulation failure (x86_64 only).
+fn inject_handler_call(
+    uctx: &mut UserContext,
+    handler: usize,
+    userdata: u64,
+    result: i64,
+) -> bool {
+    #[cfg(any(
+        target_arch = "riscv64",
+        target_arch = "aarch64",
+        target_arch = "loongarch64"
+    ))]
+    {
+        let ra = uctx.ip();
+        uctx.set_ra(ra);
+    }
+    #[cfg(not(any(
+        target_arch = "riscv64",
+        target_arch = "aarch64",
+        target_arch = "loongarch64"
+    )))]
+    {
+        let ret_addr = uctx.ip() as u64;
+        let Some(sp) = uctx.sp().checked_sub(8) else {
+            return false;
+        };
+        unsafe {
+            user_copy(sp as *mut u8, &ret_addr as *const u64 as *const u8, 8);
+        }
+        uctx.set_sp(sp);
+    }
+    uctx.set_ip(handler);
+    uctx.set_arg0(userdata as usize);
+    uctx.set_arg1(result as usize);
+    true
+}
 
 /// Create a new user task.
 pub fn new_user_task(name: &str, mut uctx: UserContext, set_child_tid: usize) -> TaskInner {
@@ -94,7 +135,9 @@ pub fn new_user_task(name: &str, mut uctx: UserContext, set_child_tid: usize) ->
                                 .expect("Failed to send SIGSEGV");
                         }
                     }
-                    ReturnReason::Interrupt => {}
+                    ReturnReason::Interrupt => {
+                        ax_task::yield_now();
+                    }
                     #[allow(unused_labels)]
                     ReturnReason::Exception(exc_info) => 'exc: {
                         let kind = exc_info.kind();
@@ -154,6 +197,30 @@ pub fn new_user_task(name: &str, mut uctx: UserContext, set_child_tid: usize) ->
                         raise_signal_fatal(SignalInfo::new_kernel(Signo::SIGSEGV), &uctx)
                             .expect("Failed to send SIGSEGV");
                     }
+                }
+
+                // CQ injection: deliver one pending async I/O completion.
+                if let Some(ctx) = thr.async_ctx.lock().clone()
+                    && let Some(entry) = ctx.pop_one()
+                {
+                    // Copy kernel bounce buffer → user buf (user CR3 is active).
+                    if entry.result > 0 && entry.buf != 0 {
+                        unsafe {
+                            user_copy(
+                                entry.buf as *mut u8,
+                                entry.kbuf.as_ptr(),
+                                entry.result as usize,
+                            );
+                        }
+                    }
+
+                    if !inject_handler_call(&mut uctx, ctx.handler, entry.userdata, entry.result) {
+                        continue;
+                    }
+
+                    set_timer_state(&curr, TimerState::User);
+                    curr.clear_interrupt();
+                    continue;
                 }
 
                 if !unblock_next_signal() {

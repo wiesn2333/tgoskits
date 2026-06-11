@@ -13,7 +13,10 @@ use crate::{
     file::FD_TABLE,
     mm::{copy_from_kernel, load_user_app, new_user_aspace_empty},
     pseudofs::{self, dev::tty::N_TTY},
-    task::{ProcessData, ProcessImage, Thread, add_task_to_table, new_user_task, spawn_alarm_task},
+    task::{
+        ProcessData, ProcessImage, Thread, add_task_to_table, async_io, new_user_task,
+        spawn_alarm_task,
+    },
     tracepoint::tracepoint_init,
 };
 
@@ -38,6 +41,7 @@ pub fn init(args: &[String], envs: &[String]) {
 
     pseudofs::mount_all().expect("Failed to mount pseudofs");
     spawn_alarm_task();
+    async_io::init();
 
     ax_alloc::register_page_reclaim_fn(ax_fs::page_cache_reclaim);
 

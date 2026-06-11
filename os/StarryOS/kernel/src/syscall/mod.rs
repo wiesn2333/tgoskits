@@ -1,3 +1,4 @@
+mod async_io;
 mod fs;
 mod io_mpx;
 mod ipc;
@@ -26,6 +27,34 @@ pub fn syscall_allows_signal_restart(sysno: usize) -> bool {
 }
 
 pub fn handle_syscall(uctx: &mut UserContext) {
+    // Custom async I/O syscalls (Linux unreserved range).
+    if matches!(uctx.sysno(), 461..=465) {
+        let prev_ip = uctx.ip();
+        let ret = match uctx.sysno() {
+            461 => async_io::sys_async_setup(uctx.arg0() as _),
+            462 | 464 => async_io::sys_async_read(
+                uctx.arg0() as _,
+                uctx.arg1() as _,
+                uctx.arg2() as _,
+                uctx.arg3() as i64,
+                uctx.arg4() as u64,
+            ),
+            463 | 465 => async_io::sys_async_write(
+                uctx.arg0() as _,
+                uctx.arg1() as _,
+                uctx.arg2() as _,
+                uctx.arg3() as i64,
+                uctx.arg4() as u64,
+            ),
+            _ => unreachable!(),
+        };
+        let rv = ret.unwrap_or_else(|e| -LinuxError::from(e).code() as _) as _;
+        if uctx.ip() == prev_ip {
+            uctx.set_retval(rv);
+        }
+        return;
+    }
+
     let Some(sysno) = Sysno::new(uctx.sysno()) else {
         warn!("Invalid syscall number: {}", uctx.sysno());
         uctx.set_retval(-LinuxError::ENOSYS.code() as _);

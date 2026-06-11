@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.20)
+project(async-io C)
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_C_EXTENSIONS OFF)
+add_executable(async-io src/main.c)
+target_compile_options(async-io PRIVATE -Wall -Wextra -Werror)
+install(TARGETS async-io RUNTIME DESTINATION usr/bin)

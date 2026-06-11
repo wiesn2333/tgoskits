@@ -162,6 +162,14 @@ pub trait FileLike: Pollable + DowncastSync {
         Err(AxError::InvalidInput)
     }
 
+    fn read_at(&self, _dst: &mut IoDst, _offset: u64) -> AxResult<usize> {
+        self.read(_dst)
+    }
+
+    fn write_at(&self, _src: &mut IoSrc, _offset: u64) -> AxResult<usize> {
+        self.write(_src)
+    }
+
     fn stat(&self) -> AxResult<Kstat> {
         Ok(Kstat::default())
     }
