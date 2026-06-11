@@ -1,9 +1,11 @@
 use alloc::{sync::Arc, vec, vec::Vec};
 
 use ax_errno::{AxError, AxResult};
+use linux_raw_sys::net::sockaddr;
 
 use crate::{
-    file::{get_file_like, FileLike},
+    file::{FileLike, get_file_like},
+    mm::UserConstPtr,
     task::{
         AsThread,
         async_io::{
@@ -37,11 +39,7 @@ fn submit_io_request(
 ) -> AxResult<isize> {
     let curr = ax_task::current();
     let thr = curr.as_thread();
-    let ctx = thr
-        .async_ctx
-        .lock()
-        .clone()
-        .ok_or(AxError::InvalidInput)?;
+    let ctx = thr.async_ctx.lock().clone().ok_or(AxError::InvalidInput)?;
     let req = IoRequest {
         op,
         file,
@@ -86,8 +84,31 @@ pub fn sys_async_write(
 ) -> AxResult<isize> {
     let file = get_file_like(fd)?;
     let n = count.min(MAX_IO_SIZE);
-    let kbuf = crate::mm::UserConstPtr::<u8>::from(buf as *const u8)
+    let kbuf = UserConstPtr::<u8>::from(buf as *const u8)
         .get_as_slice(n)?
         .to_vec();
     submit_io_request(IoOp::Write, file, buf, n, offset, userdata, kbuf)
+}
+
+pub fn sys_async_connect(fd: i32, addr: usize, addrlen: u32, userdata: u64) -> AxResult<isize> {
+    use axnet::{SocketAddrEx, SocketOps};
+
+    use crate::syscall::net::addr::{SocketAddrExt, normalize_socket_addr_ex_for_ip_stack};
+
+    let socket = crate::file::Socket::from_fd(fd)?;
+    let user_addr = UserConstPtr::<sockaddr>::from(addr as *const sockaddr);
+    let mut addr_ex = SocketAddrEx::read_from_user(user_addr, addrlen)?;
+
+    if socket.ip_domain() == linux_raw_sys::net::AF_INET6 {
+        addr_ex = normalize_socket_addr_ex_for_ip_stack(addr_ex, false)?;
+    }
+
+    socket.set_nonblocking(true)?;
+
+    match socket.connect(addr_ex) {
+        Ok(()) | Err(AxError::WouldBlock) => {
+            submit_io_request(IoOp::Connect, socket, 0, 0, 0, userdata, Vec::new())
+        }
+        Err(e) => Err(e),
+    }
 }

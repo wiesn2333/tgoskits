@@ -1,7 +1,9 @@
 use alloc::{collections::VecDeque, string::String, sync::Arc, vec, vec::Vec};
 
+use ax_errno::LinuxError;
 use ax_kspin::SpinNoIrq;
 use ax_task::{WaitQueue, spawn_raw};
+use axnet::options::Configurable;
 
 use crate::file::FileLike;
 
@@ -56,6 +58,7 @@ pub(crate) const MAX_IO_SIZE: usize = 65536;
 pub enum IoOp {
     Read,
     Write,
+    Connect,
 }
 
 /// A submitted I/O request.
@@ -116,7 +119,7 @@ fn io_worker_main() {
         for req in &pending {
             let ev = match req.op {
                 IoOp::Read => IoEvents::IN,
-                IoOp::Write => IoEvents::OUT,
+                IoOp::Write | IoOp::Connect => IoEvents::OUT,
             };
             req.file.register(&mut cx, ev);
         }
@@ -126,7 +129,7 @@ fn io_worker_main() {
         while i < pending.len() {
             let ev = match pending[i].op {
                 IoOp::Read => IoEvents::IN,
-                IoOp::Write => IoEvents::OUT,
+                IoOp::Write | IoOp::Connect => IoEvents::OUT,
             };
             let ready = pending[i].file.poll().intersects(ev);
             if ready {
@@ -150,7 +153,10 @@ fn do_io(req: &IoRequest) -> CqEntry {
         IoOp::Read => {
             let mut kbuf = vec![0u8; req.count];
             let result = if req.offset >= 0 {
-                match req.file.read_at(&mut &mut kbuf[..req.count], req.offset as u64) {
+                match req
+                    .file
+                    .read_at(&mut &mut kbuf[..req.count], req.offset as u64)
+                {
                     Ok(m) => m as i64,
                     Err(e) => -(e.code() as i64),
                 }
@@ -168,9 +174,38 @@ fn do_io(req: &IoRequest) -> CqEntry {
                 kbuf,
             }
         }
+        IoOp::Connect => {
+            let socket = req.file.clone().downcast_arc::<crate::file::Socket>();
+            let result = match socket {
+                Ok(sock) => {
+                    let mut err: i32 = 0;
+                    match sock.get_option(axnet::options::GetSocketOption::Error(&mut err)) {
+                        Ok(_) => {
+                            if err == 0 {
+                                0
+                            } else {
+                                -(err as i64)
+                            }
+                        }
+                        Err(e) => -(e.code() as i64),
+                    }
+                }
+                Err(_) => -(LinuxError::ENOTSOCK.code() as i64),
+            };
+            CqEntry {
+                userdata: req.userdata,
+                result,
+                buf: 0,
+                count: 0,
+                kbuf: Vec::new(),
+            }
+        }
         IoOp::Write => {
             let result = if req.offset >= 0 {
-                match req.file.write_at(&mut &req.kbuf[..req.count], req.offset as u64) {
+                match req
+                    .file
+                    .write_at(&mut &req.kbuf[..req.count], req.offset as u64)
+                {
                     Ok(m) => m as i64,
                     Err(e) => -(e.code() as i64),
                 }

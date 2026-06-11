@@ -1,4 +1,4 @@
-mod addr;
+pub(crate) mod addr;
 mod cmsg;
 mod io;
 mod name;

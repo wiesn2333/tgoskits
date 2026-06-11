@@ -1,11 +1,15 @@
 # AGENTS.md
 
+Root `CLAUDE.md` has the full command reference, architecture, and CI docs. This file adds what that omits.
+
 ## Project Skills
 
 - `update-std-tests`: project-local skill at `.claude/skills/update-std-tests/SKILL.md`
 - Use `update-std-tests` when the user wants to audit or update `scripts/test/std_crates.csv`, compare workspace packages against the std test whitelist, or confirm which new std-test candidates should be added.
 - `starry-test-suit`: project-local skill at `.claude/skills/starry-test-suit/SKILL.md`
 - Use `starry-test-suit` when the user wants to add, regroup, adapt, or validate `test-suit/starryos` cases, including `qemu-*.toml`, `normal`/`stress` grouping, success/fail regexes, or Starry test-suit related CI behavior.
+- `arceos-test-adapter`: project-local skill at `.claude/skills/arceos-test-adapter/SKILL.md`
+- Use `arceos-test-adapter` when the user wants to add, fix, or adapt ArceOS test-suit cases under `test-suit/arceos`, fill in `qemu-*.toml`, fix success/fail regexes, or make an ArceOS test pass or fail correctly in the xtask test runner.
 - `cross-kernel-driver`: project-local skill at `.claude/skills/cross-kernel-driver/SKILL.md`
 - Use `cross-kernel-driver` when the user wants to create, refactor, review, or optimize portable Rust driver crates under `drivers/` by device type, separate Driver Core / Capability Boundary / OS Glue / Runtime layers, handle MMIO/iomap with `mmio-api`, handle DMA with `dma-api`, design IRQ event or queue contracts, or audit OS API coupling in driver code.
 - `review-open-prs`: project-local skill at `.claude/skills/review-open-prs/SKILL.md`
@@ -34,4 +38,12 @@
 - PR descriptions must clearly cover: the problem being solved, what was changed to solve it, and the logic behind each step of the solution.
 - Before submitting a PR, locally validate the CI flow as much as practical, excluding only physical board tests and self-hosted test flows unless the user explicitly asks to run them. Changes unrelated to building or testing, such as documentation-only updates, do not require local CI validation.
 - After adding or changing commits on a PR branch, update the PR description so it stays synchronized with the committed changes.
+- StarryOS rootfs must be prepared before first QEMU run: `cargo xtask starry rootfs --arch <arch>`.
+- `STARRY_APK_REGION` env var controls APK mirror for Starry rootfs (default `china`; set to `us` for non-China CI/containers).
+- Starry user-space app smoke tests: `cargo xtask starry app qemu --all --arch <arch>`.
+- Stress QEMU tests use `--test-group stress` (e.g. `cargo xtask starry test qemu --arch aarch64 --test-group stress`). Normal (default) and stress groups are defined per test-suit.
+- Board tests: `cargo xtask starry test board --board <name>` / `cargo xtask axvisor test board --board <name>`. List boards with `cargo xtask board ls`.
+- Container image `ghcr.io/rcore-os/tgoskits-container:latest` matches CI; dev container defined in `.devcontainer/devcontainer.json`.
+- `rust-toolchain.toml` pins nightly-2026-05-28 (not the date in CLAUDE.md — trust `rust-toolchain.toml`).
+- Release is automated via `release-plz` on the `dev` branch (see `.github/workflows/release-plz.yml`).
 - Do not insert agent-related labels, signatures, branding, or other advertisement-style wording such as `codex`, `agent`, `AI`, or similar self-promotional tags unless the user explicitly requests it.

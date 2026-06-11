@@ -17,12 +17,7 @@ use crate::syscall::{handle_syscall, syscall_allows_signal_restart};
 
 /// Save return address in `uctx` and redirect `ip` to the async completion handler.
 /// Returns false on stack manipulation failure (x86_64 only).
-fn inject_handler_call(
-    uctx: &mut UserContext,
-    handler: usize,
-    userdata: u64,
-    result: i64,
-) -> bool {
+fn inject_handler_call(uctx: &mut UserContext, handler: usize, userdata: u64, result: i64) -> bool {
     #[cfg(any(
         target_arch = "riscv64",
         target_arch = "aarch64",
