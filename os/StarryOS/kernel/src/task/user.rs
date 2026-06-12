@@ -7,6 +7,7 @@ use starry_process::Pid;
 use starry_signal::{SignalInfo, Signo};
 use starry_vm::{VmMutPtr, VmPtr};
 use syscalls::Sysno;
+use core::mem::size_of;
 
 use super::{
     AsThread, SyscallRestartInfo, SyscallTraceState, TimerState, check_signals,
@@ -18,33 +19,111 @@ use crate::syscall::{handle_syscall, syscall_allows_signal_restart};
 /// Save return address in `uctx` and redirect `ip` to the async completion handler.
 /// Returns false on stack manipulation failure (x86_64 only).
 fn inject_handler_call(uctx: &mut UserContext, handler: usize, userdata: u64, result: i64) -> bool {
-    #[cfg(any(
-        target_arch = "riscv64",
-        target_arch = "aarch64",
-        target_arch = "loongarch64"
-    ))]
+    #[cfg(target_arch = "riscv64")]
+    {
+        // Save all caller-saved registers in a CqFrame on the user stack,
+        // then redirect the handler's return to a trampoline that re-enters
+        // the kernel so sys_cq_return can restore the frame.
+        //
+        // Frame layout (144 bytes = 9 x 16-byte aligned):
+        //   offset  field
+        //     0     sepc     (original return address after ecall)
+        //     8     ra
+        //    16     sp
+        //    24     t0
+        //    32     t1
+        //    40     t2
+        //    48     a1
+        //    56     a2
+        //    64     a3
+        //    72     a4
+        //    80     a5
+        //    88     a6
+        //    96     a7
+        //   104     t3
+        //   112     t4
+        //   120     t5
+        //   128     t6
+        //   136     (padding)
+
+        #[repr(C)]
+        #[derive(Clone, Copy)]
+        struct CqFrame {
+            sepc: usize,
+            ra: usize,
+            sp: usize,
+            t0: usize,
+            t1: usize,
+            t2: usize,
+            a1: usize,
+            a2: usize,
+            a3: usize,
+            a4: usize,
+            a5: usize,
+            a6: usize,
+            a7: usize,
+            t3: usize,
+            t4: usize,
+            t5: usize,
+            t6: usize,
+            _padding: usize,
+        }
+
+        const FRAME_SIZE: usize = size_of::<CqFrame>();
+        // FRAME_SIZE must be 144 (9 × 16).
+        debug_assert!(FRAME_SIZE == 144);
+        debug_assert!(FRAME_SIZE % 16 == 0);
+
+        let saved_sepc = uctx.ip();
+        let old_sp = uctx.sp();
+
+        let Some(new_sp) = old_sp.checked_sub(FRAME_SIZE) else {
+            return false;
+        };
+        uctx.set_sp(new_sp);
+
+        let frame = CqFrame {
+            sepc: saved_sepc,
+            ra: uctx.regs.ra,
+            sp: old_sp,
+            t0: uctx.regs.t0,
+            t1: uctx.regs.t1,
+            t2: uctx.regs.t2,
+            a1: uctx.regs.a1,
+            a2: uctx.regs.a2,
+            a3: uctx.regs.a3,
+            a4: uctx.regs.a4,
+            a5: uctx.regs.a5,
+            a6: uctx.regs.a6,
+            a7: uctx.regs.a7,
+            t3: uctx.regs.t3,
+            t4: uctx.regs.t4,
+            t5: uctx.regs.t5,
+            t6: uctx.regs.t6,
+            _padding: 0,
+        };
+
+        unsafe {
+            user_copy(
+                new_sp as *mut u8,
+                &frame as *const CqFrame as *const u8,
+                FRAME_SIZE,
+            );
+        }
+
+        uctx.set_ra(crate::config::CQ_TRAMPOLINE);
+        uctx.set_ip(handler);
+        uctx.set_arg0(userdata as usize);
+        uctx.set_arg1(result as usize);
+    }
+    #[cfg(not(target_arch = "riscv64"))]
     {
         let ra = uctx.ip();
         uctx.set_ra(ra);
+        uctx.set_ip(handler);
+        uctx.set_arg0(userdata as usize);
+        uctx.set_arg1(result as usize);
     }
-    #[cfg(not(any(
-        target_arch = "riscv64",
-        target_arch = "aarch64",
-        target_arch = "loongarch64"
-    )))]
-    {
-        let ret_addr = uctx.ip() as u64;
-        let Some(sp) = uctx.sp().checked_sub(8) else {
-            return false;
-        };
-        unsafe {
-            user_copy(sp as *mut u8, &ret_addr as *const u64 as *const u8, 8);
-        }
-        uctx.set_sp(sp);
-    }
-    uctx.set_ip(handler);
-    uctx.set_arg0(userdata as usize);
-    uctx.set_arg1(result as usize);
     true
 }
 

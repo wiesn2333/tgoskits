@@ -20,3 +20,6 @@ pub const USER_HEAP_SIZE_MAX: usize = 0x2000_0000;
 
 /// The address of signal trampoline (placed at top of user heap).
 pub const SIGNAL_TRAMPOLINE: usize = 0x6000_1000;
+
+/// The address of CQ completion trampoline.
+pub const CQ_TRAMPOLINE: usize = 0x6000_2000;

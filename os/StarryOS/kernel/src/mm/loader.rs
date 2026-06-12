@@ -74,6 +74,15 @@ pub fn map_trampoline(aspace: &mut AddrSpace) -> AxResult {
         PAGE_SIZE_4K,
         MappingFlags::READ | MappingFlags::EXECUTE | MappingFlags::USER,
     )?;
+    // Map the CQ completion trampoline.
+    let cq_trampoline_paddr =
+        virt_to_phys(crate::task::cq_trampoline::cq_trampoline_address().into());
+    aspace.map_linear(
+        crate::config::CQ_TRAMPOLINE.into(),
+        cq_trampoline_paddr,
+        PAGE_SIZE_4K,
+        MappingFlags::READ | MappingFlags::EXECUTE | MappingFlags::USER,
+    )?;
     Ok(())
 }
 

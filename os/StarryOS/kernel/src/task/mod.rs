@@ -2,6 +2,7 @@
 
 pub(crate) mod async_io;
 pub(crate) use async_io::AsyncContext;
+pub(crate) mod cq_trampoline;
 mod cred;
 pub mod futex;
 mod ops;

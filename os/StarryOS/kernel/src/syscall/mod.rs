@@ -28,7 +28,7 @@ pub fn syscall_allows_signal_restart(sysno: usize) -> bool {
 
 pub fn handle_syscall(uctx: &mut UserContext) {
     // Custom async I/O syscalls (Linux unreserved range).
-    if matches!(uctx.sysno(), 461..=466) {
+    if matches!(uctx.sysno(), 461..=467) {
         let prev_ip = uctx.ip();
         let ret = match uctx.sysno() {
             461 => async_io::sys_async_setup(uctx.arg0() as _),
@@ -52,6 +52,10 @@ pub fn handle_syscall(uctx: &mut UserContext) {
                 uctx.arg2() as _,
                 uctx.arg3() as u64,
             ),
+            467 => {
+                let _ = async_io::sys_cq_return(uctx);
+                return;
+            }
             _ => unreachable!(),
         };
         let rv = ret.unwrap_or_else(|e| -LinuxError::from(e).code() as _) as _;

@@ -122,9 +122,9 @@ static int part_error_cases(void)
 
 static int part_tcp_echo(void)
 {
-    TEST_START("async TCP loopback echo");
+    TEST_START("async TCP echo to host server");
 
-    char buf[16];
+    char buf[32];
     long ret;
 
     ret = syscall(SYS_async_setup, (uintptr_t)async_handler);
@@ -138,8 +138,8 @@ static int part_tcp_echo(void)
     struct sockaddr_in addr;
     memset(&addr, 0, sizeof(addr));
     addr.sin_family = AF_INET;
-    addr.sin_port   = htons(49152);
-    addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+    addr.sin_port   = htons(8080);
+    addr.sin_addr.s_addr = inet_addr("10.0.2.2");
 
     reset_handler();
     ret = syscall(SYS_async_connect, sock,
@@ -156,14 +156,16 @@ static int part_tcp_echo(void)
     CHECK(handler_result == 5,
           "write returned 5 bytes");
 
+    sleep(2);
+
     memset(buf, 0, sizeof(buf));
     reset_handler();
-    ret = syscall(SYS_async_read, sock, (uintptr_t)buf, 5, -1, 0x44);
+    ret = syscall(SYS_async_read, sock, (uintptr_t)buf, 16, -1, 0x44);
     CHECK_RET(ret, 0, "async_read submitted");
     CHECK(drain_one(), "async_read completed");
-    CHECK(handler_result == 5,
-          "read returned 5 bytes");
-    CHECK(memcmp(buf, "hello", 5) == 0,
+    CHECK(handler_result == 12,
+          "read returned 12 bytes");
+    CHECK(memcmp(buf, "echo: hello\n", 12) == 0,
           "echo data matches");
 
     close(sock);

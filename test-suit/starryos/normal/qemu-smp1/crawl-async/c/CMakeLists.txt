@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.20)
+project(crawl-async C)
+set(CMAKE_C_STANDARD 11)
+set(CMAKE_C_STANDARD_REQUIRED ON)
+set(CMAKE_C_EXTENSIONS OFF)
+add_executable(crawl-async src/crawl-async.c)
+target_compile_options(crawl-async PRIVATE -Wall -Wextra -Werror)
+install(TARGETS crawl-async RUNTIME DESTINATION usr/bin)
